@@ -149,6 +149,8 @@ struct Action {
   std::optional<Position> p;
   std::optional<ItemType> itemType;
 
+  explicit Action(ActionType actionType) : type(actionType) {}
+
   [[nodiscard]] std::string toString() const {
     std::stringstream stream;
     stream << actionTypeToString(type);
@@ -193,12 +195,21 @@ Entity readEntity() {
 
 class Game {
   Map map;
+
+  U32 m = 0;
+  U32 n = 0;
+
   std::vector<Entity> entities;
+
   std::vector<std::vector<F32>> estimatedOreAmount;
 
+  U32 myScore = 0;
+  U32 opponentScore = 0;
+
+  U32 radarCooldown = 0;
+  U32 trapCooldown = 0;
+
   void updateEstimates() {
-    const auto m = map.getHeight();
-    const auto n = map.getWidth();
     std::vector<Position> successfulDigging;
     std::vector<Position> unsuccessfulDigging;
     for (auto &entity : entities) {
@@ -244,8 +255,8 @@ class Game {
 
 public:
   Game(U32 width, U32 height) : map(width, height) {
-    const auto m = map.getHeight();
-    const auto n = map.getWidth();
+    m = map.getHeight();
+    n = map.getWidth();
     estimatedOreAmount.resize(m, std::vector<F32>(n, 1.0f));
     for (U32 i = 0; i < m; i++) {
       estimatedOreAmount[i][0] = 0.0f;
@@ -256,8 +267,8 @@ public:
 
   void updateEntities() {
     const auto entityCount = read<U32>();
-    const auto radarCooldown = read<U32>();
-    const auto trapCooldown = read<U32>();
+    radarCooldown = read<U32>();
+    trapCooldown = read<U32>();
     for (U32 i = 0; i < entityCount; i++) {
       const auto entity = readEntity();
       auto updatedAnExistingEntity = false;
@@ -277,41 +288,71 @@ public:
     }
   }
 
+  void updateState() {
+    myScore = read<U32>();
+    opponentScore = read<U32>();
+    updateMap();
+    updateEntities();
+  }
+
+  void considerGettingRadar(Entity &entity, Action &action) {
+    if (entity.p.x == 0) {
+      if (radarCooldown == 0) {
+        action.type = ActionType::Request;
+        action.itemType = ItemType::Radar;
+      }
+    }
+  }
+
+  void considerDigging(Entity &entity, Action &action) {
+    std::optional<Position> best;
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        if (estimatedOreAmount[i][j] > 0.0f) {
+          Position q(j, i);
+          if (!best) {
+            best = q;
+          }
+          const auto currentDistance = entity.p.distanceTo(best.value());
+          const auto alternativeDistance = entity.p.distanceTo(q);
+          if (alternativeDistance < currentDistance) {
+            best = q;
+          }
+        }
+      }
+    }
+    if (best.has_value()) {
+      action.type = ActionType::Dig;
+      action.p = best;
+    }
+  }
+
   void moveEntities() {
     updateEstimates();
-    const auto m = map.getHeight();
-    const auto n = map.getWidth();
     for (auto &entity : entities) {
       if (entity.type == EntityType::MyRobot) {
+        Action action(ActionType::Wait);
         if (entity.dead) {
-          continue;
-        }
-        Action action;
-        if (entity.item == ItemType::Ore) {
+        } else if (entity.item == ItemType::Ore) {
           action.type = ActionType::Move;
           action.p = Position(0, entity.p.y);
-        } else {
-          std::optional<Position> best;
-          for (U32 i = 0; i < m; i++) {
-            for (U32 j = 0; j < n; j++) {
-              if (estimatedOreAmount[i][j] > 0.0f) {
-                Position q(j, i);
-                if (!best) {
-                  best = q;
-                }
-                const auto currentDistance = entity.p.distanceTo(best.value());
-                const auto alternativeDistance = entity.p.distanceTo(q);
-                if (alternativeDistance < currentDistance) {
-                  best = q;
-                }
-              }
+        } else if (entity.item == ItemType::Radar) {
+          action.type = ActionType::Dig;
+          std::optional<Position> whereToDig;
+          if (!entity.actions.empty()) {
+            if (entity.actions.back().type == ActionType::Dig) {
+              whereToDig = entity.actions.back().p;
             }
           }
-          if (best.has_value()) {
-            action.type = ActionType::Dig;
-            action.p = best;
+          if (whereToDig) {
+            action.p = whereToDig.value();
           } else {
-            action.type = ActionType::Wait;
+            action.p = Position(std::rand() % n, std::rand() % m);
+          }
+        } else {
+          considerGettingRadar(entity, action);
+          if (action.type == ActionType::Wait) {
+            considerDigging(entity, action);
           }
         }
         std::cout << action.toString() << std::endl;
@@ -327,10 +368,7 @@ int main() {
   Game game(width, height);
   auto running = true;
   while (running) {
-    const auto myScore = read<U32>();
-    const auto opponentScore = read<U32>();
-    game.updateMap();
-    game.updateEntities();
+    game.updateState();
     game.moveEntities();
   }
 }
