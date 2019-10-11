@@ -19,6 +19,10 @@ using S32 = int32_t;
 using F32 = float;
 using F64 = double;
 
+using BooleanMatrix = std::vector<std::vector<bool>>;
+
+constexpr U32 RadarRadius = 4;
+
 template <typename T> T read() {
   T t;
   std::cin >> t;
@@ -234,6 +238,27 @@ class Game {
   U32 radarCooldown = 0;
   U32 trapCooldown = 0;
 
+  [[nodiscard]] BooleanMatrix getRadarCoverage() const {
+    std::vector<Position> radars;
+    for (const auto &entity : entities) {
+      if (entity.type == EntityType::Radar) {
+        radars.push_back(entity.p);
+      }
+    }
+    std::vector<std::vector<bool>> coverage(m, std::vector<bool>(n));
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        const auto p = Position(j, i);
+        for (const auto radarPosition : radars) {
+          if (p.distanceTo(radarPosition) <= RadarRadius) {
+            coverage[i][j] = true;
+          }
+        }
+      }
+    }
+    return coverage;
+  }
+
   void updateEstimates() {
     std::vector<Position> successfulDigging;
     std::vector<Position> unsuccessfulDigging;
@@ -317,6 +342,52 @@ class Game {
     return best;
   }
 
+  [[nodiscard]] F32 evaluateRadarScore(U32 i, U32 j,
+                                       const BooleanMatrix &coverage) const {
+    F32 score = 0.0f;
+    const auto sI = static_cast<S32>(i);
+    const auto sJ = static_cast<S32>(j);
+    const auto signedRadius = static_cast<S32>(RadarRadius);
+    for (auto pI = sI - signedRadius; pI <= sI + signedRadius; pI++) {
+      for (auto pJ = sJ - signedRadius; pJ <= sJ + signedRadius; pJ++) {
+        const auto signedM = static_cast<S32>(m);
+        const auto signedN = static_cast<S32>(n);
+        if (pI < 0 || pI >= signedM || pJ < 0 || pJ >= signedN) {
+          continue;
+        }
+        if (coverage[pI][pJ]) {
+          continue;
+        }
+        score += estimatedOreAmount[pI][pJ];
+      }
+    }
+    return score;
+  }
+
+  [[nodiscard]] std::optional<Position> findRadarPosition() {
+    std::optional<Position> best;
+    float bestScore = 0.0f;
+    const auto coverage = getRadarCoverage();
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        if (trapProbability[i][j] == 1.0f) {
+          continue;
+        }
+        const auto otherScore = evaluateRadarScore(i, j, coverage);
+        if (!best || bestScore < otherScore) {
+          best = Position(j, i);
+          bestScore = otherScore;
+        }
+      }
+    }
+    if (best) {
+      std::cerr << "Found radar position @" << ' ';
+      std::cerr << "(" << best->y << ", " << best->x << ")" << ' ';
+      std::cerr << "with a score of " << bestScore << "." << '\n';
+    }
+    return best;
+  }
+
 public:
   Game(U32 width, U32 height) : map(width, height) {
     m = map.getHeight();
@@ -358,7 +429,6 @@ public:
       std::cerr << '\n';
     }
     std::cerr.flags(formatFlags);
-
     for (U32 i = 0; i < m; i++) {
       estimatedOreAmount[i][0] = 0.0f;
     }
@@ -448,7 +518,7 @@ public:
             }
           }
           if (!whereToDig) {
-            whereToDig = findDiggingPosition(entity);
+            whereToDig = findRadarPosition();
           }
           if (whereToDig) {
             action.type = ActionType::Dig;
