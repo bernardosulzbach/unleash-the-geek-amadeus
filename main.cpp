@@ -205,6 +205,7 @@ class Game {
 
   std::vector<Entity> entities;
 
+  std::vector<std::vector<F32>> trapProbability;
   std::vector<std::vector<F32>> estimatedOreAmount;
 
   U32 myScore = 0;
@@ -262,6 +263,7 @@ public:
     m = map.getHeight();
     n = map.getWidth();
     estimatedOreAmount.resize(m, std::vector<F32>(n));
+    trapProbability.resize(m, std::vector<F32>(n));
     F64 total = 0.0;
     for (U32 i = 0; i < m; i++) {
       for (U32 j = 0; j < n; j++) {
@@ -353,18 +355,37 @@ public:
     }
   }
 
+  void considerGettingTrap(Entity &entity, Action &action) {
+    if (entity.p.x == 0) {
+      if (trapCooldown == 0) {
+        action.type = ActionType::Request;
+        action.itemType = ItemType::Trap;
+      }
+    }
+  }
+
   void considerDigging(Entity &entity, Action &action) {
     std::optional<Position> best;
     for (U32 i = 0; i < m; i++) {
       for (U32 j = 0; j < n; j++) {
+        if (trapProbability[i][j] > 0.0f) {
+          continue;
+        }
         if (estimatedOreAmount[i][j] > 0.0f) {
           Position q(j, i);
           if (!best) {
             best = q;
           }
+          const auto currentEstimate = estimatedOreAmount[best->y][best->x];
+          const auto otherEstimate = estimatedOreAmount[q.y][q.x];
+          auto score = 1.0;
           const auto currentDistance = entity.p.distanceTo(best.value());
-          const auto alternativeDistance = entity.p.distanceTo(q);
-          if (alternativeDistance < currentDistance) {
+          const auto otherDistance = entity.p.distanceTo(q);
+          score *= (otherEstimate + 1.0f) / (currentEstimate + 1.0f);
+          const auto currentTimeScore = (currentDistance + 1.0f) / 4.0f;
+          const auto otherTimeScore = (otherDistance + 1.0f) / 4.0f;
+          score *= std::ceil(currentTimeScore) / std::ceil(otherTimeScore);
+          if (score > 1.0f) {
             best = q;
           }
         }
@@ -396,12 +417,39 @@ public:
           if (whereToDig) {
             action.p = whereToDig.value();
           } else {
-            action.p = Position(std::rand() % n, std::rand() % m);
+            do {
+              action.p = Position(std::rand() % n, std::rand() % m);
+            } while (trapProbability[action.p->y][action.p->x] > 0.0);
+          }
+        } else if (entity.item == ItemType::Trap) {
+          action.type = ActionType::Dig;
+          std::optional<Position> whereToDig;
+          if (!entity.actions.empty()) {
+            if (entity.actions.back().type == ActionType::Dig) {
+              whereToDig = entity.actions.back().p;
+            }
+          }
+          if (whereToDig) {
+            action.p = whereToDig.value();
+          } else {
+            do {
+              action.p = Position(std::rand() % n, std::rand() % m);
+            } while (trapProbability[action.p->y][action.p->x] > 0.0);
           }
         } else {
           considerGettingRadar(entity, action);
           if (action.type == ActionType::Wait) {
+            considerGettingTrap(entity, action);
+          }
+          if (action.type == ActionType::Wait) {
             considerDigging(entity, action);
+          }
+        }
+        if (action.type == ActionType::Request) {
+          if (action.itemType == ItemType::Radar) {
+            radarCooldown = 5;
+          } else if (action.itemType == ItemType::Trap) {
+            trapCooldown = 5;
           }
         }
         std::cout << action.toString() << std::endl;
