@@ -4,11 +4,13 @@
 #include <ios>
 #include <iostream>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
 
 using U8 = uint8_t;
+using U16 = uint16_t;
 using U32 = uint32_t;
 using U64 = uint64_t;
 
@@ -26,6 +28,7 @@ template <typename T> T read() {
 struct Cell {
   std::optional<U8> ore;
   bool hasHole = false;
+  U16 holeAge = 0;
 };
 
 class Map {
@@ -37,6 +40,12 @@ public:
   [[nodiscard]] U32 getHeight() const { return cells.size(); }
 
   [[nodiscard]] U32 getWidth() const { return cells.front().size(); }
+
+  [[nodiscard]] U32 getHoleAge(U32 i, U32 j) const {
+    return cells[i][j].holeAge;
+  }
+
+  [[nodiscard]] bool hasHole(U32 i, U32 j) const { return cells[i][j].hasHole; }
 
   [[nodiscard]] bool hasOreCount(U32 i, U32 j) const {
     return cells[i][j].ore.has_value();
@@ -54,6 +63,9 @@ public:
           cells[i][j].ore = std::nullopt;
         } else {
           cells[i][j].ore = std::stoul(oreString);
+        }
+        if (cells[i][j].hasHole) {
+          cells[i][j].holeAge++;
         }
         cells[i][j].hasHole = read<U8>() == 1;
       }
@@ -92,6 +104,14 @@ struct Position {
     const auto dx = std::max(x, other.x) - std::min(x, other.x);
     const auto dy = std::max(y, other.y) - std::min(y, other.y);
     return dx + dy;
+  }
+
+  [[nodiscard]] U32 turnsToDigAt(const Position &other) const {
+    const auto distance = distanceTo(other);
+    if (distance <= 1) {
+      return 0;
+    }
+    return (distance - 1 + 3) / 4;
   }
 };
 
@@ -244,18 +264,57 @@ class Game {
           for (const auto position : successfulDigging) {
             if (position == p) {
               std::cerr << "Setting estimate @ (" << p << ") to 1/2." << '\n';
-              estimatedOreAmount[i][j] = 0.5f;
+              const auto afterMining = estimatedOreAmount[i][j] - 1.0f;
+              estimatedOreAmount[i][j] = std::max(0.0f, afterMining);
             }
           }
           for (const auto position : unsuccessfulDigging) {
             if (position == p) {
               std::cerr << "Setting estimate @ (" << p << ") to 0." << '\n';
               estimatedOreAmount[i][j] = 0.0f;
+              continue;
+            }
+          }
+          if (map.hasHole(i, j)) {
+            if (map.getHoleAge(i, j) == 0) {
+              const auto afterMining = estimatedOreAmount[i][j] - 1.0f;
+              trapProbability[i][j] = std::max(trapProbability[i][j], 0.5f);
+              estimatedOreAmount[i][j] = std::max(0.0f, afterMining);
             }
           }
         }
       }
     }
+  }
+
+  [[nodiscard]] std::optional<Position> findDiggingPosition(Entity &entity) {
+    std::optional<Position> best;
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        if (estimatedOreAmount[i][j] > 0.0f) {
+          Position other(j, i);
+          if (!best) {
+            best = other;
+          }
+          const auto bestTrapProbability = trapProbability[best->y][best->x];
+          const auto otherTrapProbability = trapProbability[other.y][other.x];
+          const auto bestEstimate = estimatedOreAmount[best->y][best->x];
+          const auto otherEstimate = estimatedOreAmount[other.y][other.x];
+          if (otherTrapProbability < bestTrapProbability) {
+            best = other;
+          } else if (bestEstimate < 1.0f && otherEstimate >= 1.0f) {
+            best = other;
+          } else if (bestEstimate >= 1.0f && otherEstimate >= 1.0f) {
+            const auto turnsToDigAtBest = entity.p.turnsToDigAt(best.value());
+            const auto turnsToDigAtOther = entity.p.turnsToDigAt(other);
+            if (turnsToDigAtOther < turnsToDigAtBest) {
+              best = other;
+            }
+          }
+        }
+      }
+    }
+    return best;
   }
 
 public:
@@ -365,32 +424,7 @@ public:
   }
 
   void considerDigging(Entity &entity, Action &action) {
-    std::optional<Position> best;
-    for (U32 i = 0; i < m; i++) {
-      for (U32 j = 0; j < n; j++) {
-        if (trapProbability[i][j] > 0.0f) {
-          continue;
-        }
-        if (estimatedOreAmount[i][j] > 0.0f) {
-          Position q(j, i);
-          if (!best) {
-            best = q;
-          }
-          const auto currentEstimate = estimatedOreAmount[best->y][best->x];
-          const auto otherEstimate = estimatedOreAmount[q.y][q.x];
-          auto score = 1.0;
-          const auto currentDistance = entity.p.distanceTo(best.value());
-          const auto otherDistance = entity.p.distanceTo(q);
-          score *= (otherEstimate + 1.0f) / (currentEstimate + 1.0f);
-          const auto currentTimeScore = (currentDistance + 1.0f) / 4.0f;
-          const auto otherTimeScore = (otherDistance + 1.0f) / 4.0f;
-          score *= std::ceil(currentTimeScore) / std::ceil(otherTimeScore);
-          if (score > 1.0f) {
-            best = q;
-          }
-        }
-      }
-    }
+    const auto best = findDiggingPosition(entity);
     if (best.has_value()) {
       action.type = ActionType::Dig;
       action.p = best;
@@ -407,34 +441,34 @@ public:
           action.type = ActionType::Move;
           action.p = Position(0, entity.p.y);
         } else if (entity.item == ItemType::Radar) {
-          action.type = ActionType::Dig;
           std::optional<Position> whereToDig;
           if (!entity.actions.empty()) {
             if (entity.actions.back().type == ActionType::Dig) {
               whereToDig = entity.actions.back().p;
             }
           }
+          if (!whereToDig) {
+            whereToDig = findDiggingPosition(entity);
+          }
           if (whereToDig) {
+            action.type = ActionType::Dig;
             action.p = whereToDig.value();
-          } else {
-            do {
-              action.p = Position(std::rand() % n, std::rand() % m);
-            } while (trapProbability[action.p->y][action.p->x] > 0.0);
           }
         } else if (entity.item == ItemType::Trap) {
-          action.type = ActionType::Dig;
           std::optional<Position> whereToDig;
           if (!entity.actions.empty()) {
             if (entity.actions.back().type == ActionType::Dig) {
               whereToDig = entity.actions.back().p;
             }
           }
+          if (!whereToDig) {
+            whereToDig = findDiggingPosition(entity);
+          }
           if (whereToDig) {
+            action.type = ActionType::Dig;
             action.p = whereToDig.value();
-          } else {
-            do {
-              action.p = Position(std::rand() % n, std::rand() % m);
-            } while (trapProbability[action.p->y][action.p->x] > 0.0);
+            // Assume we succeed at placing a trap there.
+            trapProbability[action.p->y][action.p->x] = 1.0f;
           }
         } else {
           considerGettingRadar(entity, action);
