@@ -1,4 +1,7 @@
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <ios>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -12,6 +15,7 @@ using U64 = uint64_t;
 using S32 = int32_t;
 
 using F32 = float;
+using F64 = double;
 
 template <typename T> T read() {
   T t;
@@ -257,7 +261,43 @@ public:
   Game(U32 width, U32 height) : map(width, height) {
     m = map.getHeight();
     n = map.getWidth();
-    estimatedOreAmount.resize(m, std::vector<F32>(n, 1.0f));
+    estimatedOreAmount.resize(m, std::vector<F32>(n));
+    F64 total = 0.0;
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        const auto ci = (m - 1.0) / 2.0;
+        const auto cj = (n - 1.0) / 2.0;
+        const auto sigma = std::min(m, n) / 2;
+        const auto xSquared = std::pow(static_cast<F64>(j) - cj, 2.0);
+        const auto ySquared = std::pow(static_cast<F64>(i) - ci, 2.0);
+        const auto sumOfSquares = -(xSquared + ySquared);
+        const auto sigmaSquared = std::pow(sigma, 2.0);
+        const auto exponent = std::exp(sumOfSquares / (2.0 * sigmaSquared));
+        const auto pi = 4.0 * std::atan(1.0);
+        const auto gaussian = 1.0 / (2.0 * pi * sigmaSquared) * exponent;
+        estimatedOreAmount[i][j] = gaussian;
+        total += estimatedOreAmount[i][j];
+      }
+    }
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        estimatedOreAmount[i][j] *= ((m * n) / total);
+      }
+    }
+    std::ios_base::fmtflags formatFlags(std::cerr.flags());
+    std::cerr << std::fixed;
+    std::cerr << std::setprecision(2);
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        if (j > 0) {
+          std::cerr << ' ';
+        }
+        std::cerr << estimatedOreAmount[i][j];
+      }
+      std::cerr << '\n';
+    }
+    std::cerr.flags(formatFlags);
+
     for (U32 i = 0; i < m; i++) {
       estimatedOreAmount[i][0] = 0.0f;
     }
@@ -284,6 +324,15 @@ public:
       }
       if (!updatedAnExistingEntity) {
         entities.push_back(entity);
+      }
+    }
+    for (U32 i = 0; i < entityCount; i++) {
+      if (entities[i].type == EntityType::TheirRobot) {
+        if (entities[i].item != ItemType::None) {
+          const auto itemType = itemTypeToString(entities[i].item);
+          std::cerr << "Entity " << entities[i].id << ' ';
+          std::cerr << "has " << itemType << '.' << std::endl;
+        }
       }
     }
   }
