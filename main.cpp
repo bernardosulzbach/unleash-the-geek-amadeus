@@ -398,7 +398,7 @@ public:
     for (U32 i = 0; i < m; i++) {
       for (U32 j = 0; j < n; j++) {
         const auto ci = (m - 1.0) / 2.0;
-        const auto cj = (n - 1.0) / 2.0;
+        const auto cj = 3.0 * (n - 1.0) / 4.0;
         const auto sigma = std::min(m, n) / 2;
         const auto xSquared = std::pow(static_cast<F64>(j) - cj, 2.0);
         const auto ySquared = std::pow(static_cast<F64>(i) - ci, 2.0);
