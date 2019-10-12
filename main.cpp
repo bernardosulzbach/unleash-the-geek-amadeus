@@ -7,6 +7,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 using U8 = uint8_t;
@@ -27,6 +28,24 @@ template <typename T> T read() {
   T t;
   std::cin >> t;
   return t;
+}
+
+void printMatrix(const std::vector<std::vector<F32>> &matrix) {
+  std::ios_base::fmtflags formatFlags(std::cerr.flags());
+  std::cerr << std::fixed;
+  std::cerr << std::setprecision(2);
+  const auto m = static_cast<U32>(matrix.size());
+  for (U32 i = 0; i < m; i++) {
+    const auto n = static_cast<U32>(matrix.front().size());
+    for (U32 j = 0; j < n; j++) {
+      if (j > 0) {
+        std::cerr << ' ';
+      }
+      std::cerr << matrix[i][j];
+    }
+    std::cerr << '\n';
+  }
+  std::cerr.flags(formatFlags);
 }
 
 struct Cell {
@@ -196,6 +215,7 @@ struct Entity {
   U32 id = -1;
   EntityType type = EntityType::None;
   bool dead = false;
+  Position previousP;
   Position p;
   ItemType item = ItemType::None;
   std::vector<Action> actions;
@@ -231,6 +251,8 @@ class Game {
 
   std::vector<std::vector<F32>> trapProbability;
   std::vector<std::vector<F32>> estimatedOreAmount;
+
+  std::unordered_set<U32> suspects;
 
   U32 myScore = 0;
   U32 opponentScore = 0;
@@ -388,6 +410,26 @@ class Game {
     return best;
   }
 
+  void increaseTrapSuspicion(const S32 x, const S32 y) {
+    if (x < 0 || x >= static_cast<S32>(n)) {
+      return;
+    }
+    if (y < 0 || y >= static_cast<S32>(m)) {
+      return;
+    }
+    trapProbability[y][x] = std::min(1.0f, trapProbability[y][x] + 0.25f);
+  }
+
+  void increaseTrapSuspicion(const Position &p) {
+    const auto sx = static_cast<S32>(p.x);
+    const auto sy = static_cast<S32>(p.y);
+    increaseTrapSuspicion(sx - 1, sy);
+    increaseTrapSuspicion(sx, sy - 1);
+    increaseTrapSuspicion(sx, sy);
+    increaseTrapSuspicion(sx, sy + 1);
+    increaseTrapSuspicion(sx + 1, sy);
+  }
+
 public:
   Game(U32 width, U32 height) : map(width, height) {
     m = map.getHeight();
@@ -416,19 +458,7 @@ public:
         estimatedOreAmount[i][j] *= ((m * n) / total);
       }
     }
-    std::ios_base::fmtflags formatFlags(std::cerr.flags());
-    std::cerr << std::fixed;
-    std::cerr << std::setprecision(2);
-    for (U32 i = 0; i < m; i++) {
-      for (U32 j = 0; j < n; j++) {
-        if (j > 0) {
-          std::cerr << ' ';
-        }
-        std::cerr << estimatedOreAmount[i][j];
-      }
-      std::cerr << '\n';
-    }
-    std::cerr.flags(formatFlags);
+    printMatrix(estimatedOreAmount);
     for (U32 i = 0; i < m; i++) {
       estimatedOreAmount[i][0] = 0.0f;
     }
@@ -444,11 +474,36 @@ public:
       const auto entity = readEntity();
       auto updatedAnExistingEntity = false;
       for (auto &existingEntity : entities) {
-        if (entity.id == existingEntity.id) {
+        const auto id = existingEntity.id;
+        if (entity.id == id) {
           existingEntity.type = entity.type;
+          if (!existingEntity.dead && entity.dead) {
+            if (existingEntity.type == EntityType::MyRobot) {
+              // One of ours just died.
+              printMatrix(trapProbability);
+            }
+          }
           existingEntity.dead = entity.dead;
+          existingEntity.previousP = existingEntity.p;
           existingEntity.p = entity.p;
           existingEntity.item = entity.item;
+          if (existingEntity.type == EntityType::TheirRobot) {
+            if (existingEntity.p == existingEntity.previousP) {
+              // Stood still at the elevator.
+              if (existingEntity.p.x == 0) {
+                suspects.insert(id);
+                std::cerr << "Added " << id << " as a suspect." << '\n';
+              }
+              // Stood still somewhere else.
+              if (existingEntity.p.x > 0) {
+                if (suspects.count(id) == 1) {
+                  suspects.erase(id);
+                  std::cerr << "Removed " << id << " as a suspect." << '\n';
+                  increaseTrapSuspicion(existingEntity.p);
+                }
+              }
+            }
+          }
           updatedAnExistingEntity = true;
           break;
         }
