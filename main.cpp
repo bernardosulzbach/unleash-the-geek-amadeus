@@ -377,6 +377,11 @@ class Game {
         if (pI < 0 || pI >= signedM || pJ < 0 || pJ >= signedN) {
           continue;
         }
+        const auto dI = std::max(sI, pI) - std::min(sI, pI);
+        const auto dJ = std::max(sJ, pJ) - std::min(sJ, pJ);
+        if (dI + dJ > signedRadius) {
+          continue;
+        }
         if (coverage[pI][pJ]) {
           continue;
         }
@@ -404,7 +409,7 @@ class Game {
     }
     if (best) {
       std::cerr << "Found radar position @" << ' ';
-      std::cerr << "(" << best->y << ", " << best->x << ")" << ' ';
+      std::cerr << "(" << best->x << ", " << best->y << ")" << ' ';
       std::cerr << "with a score of " << bestScore << "." << '\n';
     }
     return best;
