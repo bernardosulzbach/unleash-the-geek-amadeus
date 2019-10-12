@@ -136,6 +136,10 @@ struct Position {
     }
     return (distance - 1 + 3) / 4;
   }
+
+  [[nodiscard]] U32 turnsToDigAtAndReturn(const Position &other) const {
+    return turnsToDigAt(other) + (other.x + 3) / 4;
+  }
 };
 
 std::ostream &operator<<(std::ostream &stream, const Position &p) {
@@ -352,9 +356,9 @@ class Game {
           } else if (bestEstimate < 1.0f && otherEstimate >= 1.0f) {
             best = other;
           } else if (bestEstimate >= 1.0f && otherEstimate >= 1.0f) {
-            const auto turnsToDigAtBest = entity.p.turnsToDigAt(best.value());
-            const auto turnsToDigAtOther = entity.p.turnsToDigAt(other);
-            if (turnsToDigAtOther < turnsToDigAtBest) {
+            const auto bestTurns = entity.p.turnsToDigAtAndReturn(best.value());
+            const auto otherTurns = entity.p.turnsToDigAtAndReturn(other);
+            if (otherTurns < bestTurns) {
               best = other;
             }
           }
