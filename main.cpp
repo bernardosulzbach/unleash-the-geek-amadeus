@@ -304,7 +304,7 @@ class Game {
             if (map.getHoleAge(i, j) == 0) {
               const auto afterMining = estimatedOreAmount[i][j] - 1.0f;
               trapProbability[i][j] = std::max(trapProbability[i][j], 0.5f);
-              estimatedOreAmount[i][j] = std::max(0.0f, afterMining);
+              estimatedOreAmount[i][j] = std::max(0.5f, afterMining);
             }
           }
         }
@@ -399,7 +399,7 @@ public:
       for (U32 j = 0; j < n; j++) {
         const auto ci = (m - 1.0) / 2.0;
         const auto cj = 3.0 * (n - 1.0) / 4.0;
-        const auto sigma = std::min(m, n) / 2;
+        const auto sigma = std::min(m, n);
         const auto xSquared = std::pow(static_cast<F64>(j) - cj, 2.0);
         const auto ySquared = std::pow(static_cast<F64>(i) - ci, 2.0);
         const auto sumOfSquares = -(xSquared + ySquared);
