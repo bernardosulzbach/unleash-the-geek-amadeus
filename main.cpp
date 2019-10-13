@@ -4,8 +4,6 @@
 #include <ios>
 #include <iostream>
 #include <optional>
-#include <random>
-#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -132,9 +130,9 @@ struct Position {
   [[nodiscard]] U32 turnsToDigAt(const Position &other) const {
     const auto distance = distanceTo(other);
     if (distance <= 1) {
-      return 0;
+      return 1;
     }
-    return (distance - 1 + 3) / 4;
+    return 1 + (distance - 1 + 3) / 4;
   }
 
   [[nodiscard]] U32 turnsToDigAtAndReturn(const Position &other) const {
@@ -316,23 +314,26 @@ class Game {
           // Update our estimate if no ground truth is available.
           for (const auto position : successfulDigging) {
             if (position == p) {
-              std::cerr << "Setting estimate @ (" << p << ") to 1/2." << '\n';
+              std::cerr << "Setting estimate @ " << p << " to 1/2." << '\n';
               const auto afterMining = estimatedOreAmount[i][j] - 1.0f;
               estimatedOreAmount[i][j] = std::max(0.0f, afterMining);
             }
           }
           for (const auto position : unsuccessfulDigging) {
             if (position == p) {
-              std::cerr << "Setting estimate @ (" << p << ") to 0." << '\n';
+              std::cerr << "Setting estimate @ " << p << " to 0." << '\n';
               estimatedOreAmount[i][j] = 0.0f;
               continue;
             }
           }
           if (map.hasHole(i, j)) {
             if (map.getHoleAge(i, j) == 0) {
-              const auto afterMining = estimatedOreAmount[i][j] - 1.0f;
+              if (estimatedOreAmount[i][j] >= 1.0f) {
+                estimatedOreAmount[i][j] -= 1.0f;
+              } else {
+                estimatedOreAmount[i][j] *= 0.5f;
+              }
               trapProbability[i][j] = std::max(trapProbability[i][j], 0.5f);
-              estimatedOreAmount[i][j] = std::max(0.5f, afterMining);
             }
           }
         }
@@ -344,32 +345,44 @@ class Game {
     std::optional<Position> best;
     for (U32 i = 0; i < m; i++) {
       for (U32 j = 1; j < n; j++) {
-        if (estimatedOreAmount[i][j] > 0.0f) {
-          Position other(j, i);
-          if (!best) {
+        if (estimatedOreAmount[i][j] == 0.0f) {
+          continue;
+        }
+        if (hasDigger[i][j]) {
+          continue;
+        }
+        Position other(j, i);
+        if (!best) {
+          best = other;
+          continue;
+        }
+        const auto bestTrapProbability = trapProbability[best->y][best->x];
+        const auto otherTrapProbability = trapProbability[other.y][other.x];
+        if (otherTrapProbability < bestTrapProbability) {
+          best = other;
+          continue;
+        }
+        if (otherTrapProbability > bestTrapProbability) {
+          continue;
+        }
+        const auto bestEstimate = estimatedOreAmount[best->y][best->x];
+        const auto otherEstimate = estimatedOreAmount[other.y][other.x];
+        const auto changeIfAsClose = [&entity, &best, other]() {
+          const auto bestTurns = entity.p.turnsToDigAtAndReturn(best.value());
+          const auto otherTurns = entity.p.turnsToDigAtAndReturn(other);
+          if (otherTurns <= bestTurns) {
             best = other;
           }
-          const auto bestTrapProbability = trapProbability[best->y][best->x];
-          const auto otherTrapProbability = trapProbability[other.y][other.x];
-          const auto bestEstimate = estimatedOreAmount[best->y][best->x];
-          const auto otherEstimate = estimatedOreAmount[other.y][other.x];
-          if (otherTrapProbability < bestTrapProbability) {
+        };
+        if (bestEstimate < 1.0f) {
+          if (otherEstimate >= 1.0f) {
             best = other;
-          } else if (otherTrapProbability > bestTrapProbability) {
-            continue;
+          } else if (otherEstimate > bestEstimate) {
+            changeIfAsClose();
           }
-          const auto otherIsUsed = hasDigger[other.y][other.x];
-          if (otherIsUsed) {
-            continue;
-          }
-          if (bestEstimate < 1.0f && otherEstimate >= 1.0f) {
-            best = other;
-          } else if (bestEstimate >= 1.0f && otherEstimate >= 1.0f) {
-            const auto bestTurns = entity.p.turnsToDigAtAndReturn(best.value());
-            const auto otherTurns = entity.p.turnsToDigAtAndReturn(other);
-            if (otherTurns < bestTurns) {
-              best = other;
-            }
+        } else {
+          if (otherEstimate >= 1.0f) {
+            changeIfAsClose();
           }
         }
       }
@@ -405,7 +418,7 @@ class Game {
         if (coverage[pI][pJ]) {
           continue;
         }
-        score += estimatedOreAmount[pI][pJ];
+        score += 1.0f;
       }
     }
     return score;
@@ -413,17 +426,32 @@ class Game {
 
   [[nodiscard]] std::optional<Position> findRadarPosition() {
     std::optional<Position> best;
-    auto bestScore = std::numeric_limits<F32>::min();
+    auto bestScore = 0.0f;
+    auto bestTrapProbability = 0.0f;
     const auto coverage = getRadarCoverage();
-    for (U32 i = 0; i < m; i++) {
-      for (U32 j = 1; j < n; j++) {
+    for (U32 j = 1; j < n; j++) {
+      for (U32 i = 0; i < m; i++) {
         if (trapProbability[i][j] == 1.0f) {
           continue;
         }
         const auto otherScore = evaluateRadarScore(i, j, coverage);
-        if (!best || otherScore > bestScore) {
+        const auto otherTrapProbability = trapProbability[i][j];
+        if (!best) {
           best = Position(j, i);
           bestScore = otherScore;
+          bestTrapProbability = otherTrapProbability;
+          continue;
+        }
+        if (otherTrapProbability < bestTrapProbability) {
+          best = Position(j, i);
+          bestScore = otherScore;
+          bestTrapProbability = otherTrapProbability;
+        } else if (otherTrapProbability == bestTrapProbability) {
+          if (otherScore > bestScore) {
+            best = Position(j, i);
+            bestScore = otherScore;
+            bestTrapProbability = otherTrapProbability;
+          }
         }
       }
     }
@@ -464,7 +492,7 @@ public:
     hasDigger.resize(m, std::vector<bool>(n));
     for (U32 i = 0; i < m; i++) {
       for (U32 j = 0; j < n; j++) {
-        estimatedOreAmount[i][j] = 0.75f + 1.0f * j / n;
+        estimatedOreAmount[i][j] = 0.95f * j / n;
       }
     }
     for (U32 i = 0; i < m; i++) {
