@@ -143,7 +143,7 @@ struct Position {
 };
 
 std::ostream &operator<<(std::ostream &stream, const Position &p) {
-  stream << p.x << ", " << p.y;
+  stream << "(" << p.x << ", " << p.y << ")";
   return stream;
 }
 
@@ -341,7 +341,7 @@ class Game {
   [[nodiscard]] std::optional<Position> findDiggingPosition(Entity &entity) {
     std::optional<Position> best;
     for (U32 i = 0; i < m; i++) {
-      for (U32 j = 0; j < n; j++) {
+      for (U32 j = 1; j < n; j++) {
         if (estimatedOreAmount[i][j] > 0.0f) {
           Position other(j, i);
           if (!best) {
@@ -353,7 +353,10 @@ class Game {
           const auto otherEstimate = estimatedOreAmount[other.y][other.x];
           if (otherTrapProbability < bestTrapProbability) {
             best = other;
-          } else if (bestEstimate < 1.0f && otherEstimate >= 1.0f) {
+          } else if (otherTrapProbability > bestTrapProbability) {
+            continue;
+          }
+          if (bestEstimate < 1.0f && otherEstimate >= 1.0f) {
             best = other;
           } else if (bestEstimate >= 1.0f && otherEstimate >= 1.0f) {
             const auto bestTurns = entity.p.turnsToDigAtAndReturn(best.value());
@@ -364,6 +367,13 @@ class Game {
           }
         }
       }
+    }
+    if (best) {
+      std::cerr << "Found digging @ " << best.value() << "." << '\n';
+      const auto trapP = trapProbability[best->y][best->x];
+      std::cerr << "  Trap: " << trapP << "." << '\n';
+      const auto oreE = estimatedOreAmount[best->y][best->x];
+      std::cerr << "  Ore:  " << oreE << "." << '\n';
     }
     return best;
   }
@@ -397,15 +407,15 @@ class Game {
 
   [[nodiscard]] std::optional<Position> findRadarPosition() {
     std::optional<Position> best;
-    float bestScore = 0.0f;
+    auto bestScore = std::numeric_limits<F32>::min();
     const auto coverage = getRadarCoverage();
     for (U32 i = 0; i < m; i++) {
-      for (U32 j = 0; j < n; j++) {
+      for (U32 j = 1; j < n; j++) {
         if (trapProbability[i][j] == 1.0f) {
           continue;
         }
         const auto otherScore = evaluateRadarScore(i, j, coverage);
-        if (!best || bestScore < otherScore) {
+        if (!best || otherScore > bestScore) {
           best = Position(j, i);
           bestScore = otherScore;
         }
@@ -413,7 +423,7 @@ class Game {
     }
     if (best) {
       std::cerr << "Found radar position @" << ' ';
-      std::cerr << "(" << best->x << ", " << best->y << ")" << ' ';
+      std::cerr << best.value() << ' ';
       std::cerr << "with a score of " << bestScore << "." << '\n';
     }
     return best;
@@ -445,32 +455,15 @@ public:
     n = map.getWidth();
     estimatedOreAmount.resize(m, std::vector<F32>(n));
     trapProbability.resize(m, std::vector<F32>(n));
-    F64 total = 0.0;
     for (U32 i = 0; i < m; i++) {
       for (U32 j = 0; j < n; j++) {
-        const auto ci = (m - 1.0) / 2.0;
-        const auto cj = 3.0 * (n - 1.0) / 4.0;
-        const auto sigma = std::min(m, n);
-        const auto xSquared = std::pow(static_cast<F64>(j) - cj, 2.0);
-        const auto ySquared = std::pow(static_cast<F64>(i) - ci, 2.0);
-        const auto sumOfSquares = -(xSquared + ySquared);
-        const auto sigmaSquared = std::pow(sigma, 2.0);
-        const auto exponent = std::exp(sumOfSquares / (2.0 * sigmaSquared));
-        const auto pi = 4.0 * std::atan(1.0);
-        const auto gaussian = 1.0 / (2.0 * pi * sigmaSquared) * exponent;
-        estimatedOreAmount[i][j] = gaussian;
-        total += estimatedOreAmount[i][j];
+        estimatedOreAmount[i][j] = 0.75f + 1.0f * j / n;
       }
     }
-    for (U32 i = 0; i < m; i++) {
-      for (U32 j = 0; j < n; j++) {
-        estimatedOreAmount[i][j] *= ((m * n) / total);
-      }
-    }
-    printMatrix(estimatedOreAmount);
     for (U32 i = 0; i < m; i++) {
       estimatedOreAmount[i][0] = 0.0f;
     }
+    printMatrix(estimatedOreAmount);
   }
 
   void updateMap() { map.readUpdate(); }
