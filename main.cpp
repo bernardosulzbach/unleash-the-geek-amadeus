@@ -256,6 +256,8 @@ class Game {
   std::vector<std::vector<F32>> trapProbability;
   std::vector<std::vector<F32>> estimatedOreAmount;
 
+  BooleanMatrix hasDigger;
+
   std::unordered_set<U32> suspects;
 
   U32 myScore = 0;
@@ -354,6 +356,10 @@ class Game {
           if (otherTrapProbability < bestTrapProbability) {
             best = other;
           } else if (otherTrapProbability > bestTrapProbability) {
+            continue;
+          }
+          const auto otherIsUsed = hasDigger[other.y][other.x];
+          if (otherIsUsed) {
             continue;
           }
           if (bestEstimate < 1.0f && otherEstimate >= 1.0f) {
@@ -455,6 +461,7 @@ public:
     n = map.getWidth();
     estimatedOreAmount.resize(m, std::vector<F32>(n));
     trapProbability.resize(m, std::vector<F32>(n));
+    hasDigger.resize(m, std::vector<bool>(n));
     for (U32 i = 0; i < m; i++) {
       for (U32 j = 0; j < n; j++) {
         estimatedOreAmount[i][j] = 0.75f + 1.0f * j / n;
@@ -466,7 +473,14 @@ public:
     printMatrix(estimatedOreAmount);
   }
 
-  void updateMap() { map.readUpdate(); }
+  void updateMap() {
+    map.readUpdate();
+    for (U32 i = 0; i < m; i++) {
+      for (U32 j = 0; j < n; j++) {
+        hasDigger[i][j] = false;
+      }
+    }
+  }
 
   void updateEntities() {
     const auto entityCount = read<U32>();
@@ -555,6 +569,7 @@ public:
     if (best.has_value()) {
       action.type = ActionType::Dig;
       action.p = best;
+      hasDigger[best->y][best->x] = true;
     }
   }
 
