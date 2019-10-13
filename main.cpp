@@ -568,15 +568,7 @@ public:
           action.type = ActionType::Move;
           action.p = Position(0, entity.p.y);
         } else if (entity.item == ItemType::Radar) {
-          std::optional<Position> whereToDig;
-          if (!entity.actions.empty()) {
-            if (entity.actions.back().type == ActionType::Dig) {
-              whereToDig = entity.actions.back().p;
-            }
-          }
-          if (!whereToDig) {
-            whereToDig = findRadarPosition();
-          }
+          const auto whereToDig = findRadarPosition();
           if (whereToDig) {
             action.type = ActionType::Dig;
             action.p = whereToDig.value();
