@@ -483,6 +483,18 @@ class Game {
     increaseTrapSuspicion(sx + 1, sy);
   }
 
+  F32 getMaximumRadarScore() const {
+    const auto coverage = getRadarCoverage();
+    auto maximumRadarScore = 0.0f;
+    for (U32 j = 1; j < n; j++) {
+      for (U32 i = 0; i < m; i++) {
+        const auto score = evaluateRadarScore(i, j, coverage);
+        maximumRadarScore = std::max(maximumRadarScore, score);
+      }
+    }
+    return maximumRadarScore;
+  }
+
 public:
   Game(U32 width, U32 height) : map(width, height) {
     m = map.getHeight();
@@ -633,7 +645,9 @@ public:
             trapProbability[action.p->y][action.p->x] = 1.0f;
           }
         } else {
-          considerGettingRadar(entity, action);
+          if (getMaximumRadarScore() >= 5) {
+            considerGettingRadar(entity, action);
+          }
           if (action.type == ActionType::Wait) {
             considerGettingTrap(entity, action);
           }
